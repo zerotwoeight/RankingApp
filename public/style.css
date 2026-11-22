@@ -247,3 +247,19 @@ button:not(:disabled):hover { filter: brightness(1.12); }
 .phbtn:not(:disabled):active { transform: translate(3px, 3px); box-shadow: none; }
 .me .phbtn + .x { margin-left: 0; }
 .donechk { font-family: var(--pixel); font-size: 10px; color: var(--bg); background: var(--green); padding: 3px 4px; flex: none; animation: pop .2s ease-out; }
+
+/* lobby QR as a button + room code in settings */
+.qrbtn { display: flex; flex-direction: column; align-items: center; gap: 8px; text-decoration: none; color: var(--muted); transition: transform .06s; }
+.qrbtn span { font-family: var(--pixel); font-size: 9px; letter-spacing: 1px; }
+.qrbtn:hover img { outline: 4px solid var(--cyan); }
+.qrbtn:hover span { color: var(--cyan); }
+.qrbtn:active { transform: translate(3px, 3px); }
+.sroom { display: flex; flex-direction: column; gap: 8px; border: 2px solid var(--line); padding: 10px; }
+.sroom .row2 { display: flex; gap: 8px; }
+.sroom .btn { font-size: 10px; padding: 10px 12px; text-decoration: none; }
+.code.small { gap: 6px; }
+.code.small b { width: 44px; height: 52px; font-size: 20px; }
+
+/* version tag */
+.ver { position: fixed; left: 10px; bottom: 8px; z-index: 30; font-family: var(--pixel); font-size: 9px; color: var(--muted); opacity: .7; pointer-events: none; }
+.phonever { position: static; text-align: center; padding: 0 0 14px; }

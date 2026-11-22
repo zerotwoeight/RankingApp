@@ -4,11 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TOP//3 — Host</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=__VERSION__">
 </head>
 <body>
 <main class="host"><div class="stage" id="stage"><div class="big">LOADING…</div></div></main>
-<script src="/common.js"></script>
-<script src="/host.js"></script>
+<script>window.APP_VERSION = "__VERSION__";</script>
+<div class="ver" aria-label="version">v__VERSION__</div>
+<script src="/common.js?v=__VERSION__"></script>
+<script src="/host.js?v=__VERSION__"></script>
 </body>
 </html>

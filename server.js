@@ -11,6 +11,7 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
+const VERSION = require('./package.json').version;
 const MAX_PLAYERS = 10;
 const TOKENS = 6;
 const MAIN_PER_PLAYER = 3;
@@ -108,7 +109,7 @@ function hostView(room) {
     text: i.revealed ? i.text : null
   }));
   return {
-    role: 'host', code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
+    role: 'host', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
     players: publicPlayers(room), items, standings: standings(room), colors: COLORS, tokens: TOKENS
   };
 }
@@ -120,7 +121,7 @@ function playerView(room, pid) {
     text: i.revealed || i.submitter === pid ? i.text : null
   }));
   return {
-    role: 'player', code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
+    role: 'player', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
     me: me ? { id: me.id, name: me.name, color: me.color, tokens: me.tokens, done: !!me.done } : null,
     players: publicPlayers(room), items, standings: standings(room), colors: COLORS, tokens: TOKENS
   };
@@ -423,6 +424,7 @@ function serveStatic(req, res, pathname) {
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
+    if (file.endsWith('.html')) data = data.toString().replace(/__VERSION__/g, VERSION);
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
     res.end(data);
   });
@@ -523,4 +525,4 @@ setInterval(() => {
   for (const [code, r] of rooms) if (!r.clients.size && now - r.touched > ROOM_TTL_MS) rooms.delete(code);
 }, 10 * 60 * 1000);
 
-server.listen(PORT, () => console.log(`Ranking app on http://localhost:${PORT}  (host screen)  ·  phones: /play`));
+server.listen(PORT, () => console.log(`TOP//3 v${VERSION} on http://localhost:${PORT}  (host screen)  ·  phones: /play`));

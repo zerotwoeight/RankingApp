@@ -27,7 +27,12 @@ function toast(msg) {
 // Live state stream. EventSource reconnects on its own after drops.
 function connect(params, onState, onGone) {
   const es = new EventSource('/events?' + new URLSearchParams(params));
-  es.onmessage = (e) => onState(JSON.parse(e.data));
+  es.onmessage = (e) => {
+    const st = JSON.parse(e.data);
+    // Server was updated: reload so this page runs the new version.
+    if (st.version && window.APP_VERSION && st.version !== window.APP_VERSION) { es.close(); return location.reload(); }
+    onState(st);
+  };
   for (const ev of ['kicked', 'ended', 'left']) es.addEventListener(ev, () => { es.close(); onGone && onGone(ev); });
   es.onerror = () => {
     // 404 (room gone / not a member) closes the stream for good.

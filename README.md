@@ -12,6 +12,8 @@ A party ranking game for shared-screen video calls. The host shares the big scre
 
 Needs Node 18+. No packages to install.
 
+Version: bump `version` in `package.json` for each iteration. It shows bottom-left on the host screen, at the bottom of the phone view, and in Settings. Open pages reload themselves when the server version changes.
+
 ```bash
 npm start          # or: node server.js
 ```

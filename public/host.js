@@ -58,7 +58,7 @@ function lobby() {
   <div class="lobby">
     <div class="joinbox">
       <div class="label" style="letter-spacing:3px">INSERT PLAYERS</div>
-      <img src="${qr}" alt="QR code to join">
+      <a class="qrbtn" href="${esc(joinUrl())}" target="_blank" rel="noopener" title="Open the player view in a new window"><img src="${qr}" alt="QR code to join. Click to open the player view in a new window"><span>OPEN PLAYER VIEW ↗</span></a>
       <div style="font-size:28px">${esc(location.host)}/play</div>
       <div class="code">${auth.code.split('').map((c) => `<b>${c}</b>`).join('')}</div>
     </div>
@@ -550,7 +550,13 @@ function renderSettings() {
   const room = S ? 10 - S.players.length : 0;
   const tog = (key, on, label) => `<button class="tog ${on ? 'on' : ''}" data-set="${key}" aria-pressed="${on}"><span>${label}</span><b>${on ? 'ON' : 'OFF'}</b></button>`;
   panel.innerHTML = `
-    <div class="shead"><span class="px" style="font-size:12px;letter-spacing:2px">SETTINGS</span><button class="x" data-set="close" aria-label="Close settings">✕</button></div>
+    <div class="shead"><span class="px" style="font-size:12px;letter-spacing:2px">SETTINGS <span style="color:var(--muted);font-size:9px">v${esc(window.APP_VERSION)}</span></span><button class="x" data-set="close" aria-label="Close settings">✕</button></div>
+    ${auth ? `<span class="label">ROOM</span>
+    <div class="sroom">
+      <div class="code small">${auth.code.split('').map((c) => `<b>${c}</b>`).join('')}</div>
+      <span style="font-size:22px;overflow-wrap:anywhere">${esc(location.host)}/play</span>
+      <div class="row2"><button class="btn ghost" data-set="copy">COPY LINK</button><a class="btn ghost" href="${esc(joinUrl())}" target="_blank" rel="noopener">OPEN ↗</a></div>
+    </div>` : ''}
     <span class="label">SOUND</span>
     ${tog('muted', !d.muted, 'Sound')}
     <label class="slider"><span>Volume</span><input type="range" min="0" max="1" step="0.05" value="${d.volume}" data-set="volume" ${d.muted ? 'disabled' : ''}><b>${Math.round(d.volume * 100)}</b></label>
@@ -587,6 +593,7 @@ panel.addEventListener('click', async (e) => {
     else if (k === 'muted') { Settings.set('muted', !Settings.data.muted); if (!Settings.data.muted) Sfx.coin(); }
     else if (k === 'clicks' || k === 'debug') Settings.set(k, !Settings.data[k]);
     else if (k === 'test') Sfx.fanfare();
+    else if (k === 'copy') { await navigator.clipboard.writeText(joinUrl()).then(() => toast('Join link copied'), () => toast(joinUrl())); }
     else if (k === 'fullscreen') {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await document.documentElement.requestFullscreen();
