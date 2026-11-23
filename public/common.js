@@ -130,4 +130,4 @@ const Sfx = (() => {
 })();
 document.addEventListener('pointerdown', (e) => { Sfx.unlock(); if (e.target.closest('button') && Settings.data.clicks) Sfx.click(); }, true);
 
-const PHASE_LABEL = { lobby: 'LOBBY', submit: 'SUBMIT', reveal: 'REVEAL', vote: 'VOTE', final: 'FINAL', results: 'RESULTS' };
+const PHASE_LABEL = { lobby: 'LOBBY', submit: 'SUBMIT', reveal: 'REVEAL', vote: 'ROUND 1', round2: 'ROUND 2', final: 'FINAL', tiebreak: 'TIE BREAK', results: 'RESULTS' };

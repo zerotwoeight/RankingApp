@@ -1,6 +1,6 @@
 {
   "name": "top3-ranking",
-  "version": "0.2.0",
+  "version": "0.4.1",
   "description": "Party ranking game for shared-screen video calls: submit, reveal, spend tokens, crown a top 3.",
   "main": "server.js",
   "scripts": {

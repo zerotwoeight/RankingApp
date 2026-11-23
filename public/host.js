@@ -39,7 +39,7 @@ const playerById = (id) => S.players.find((p) => p.id === id);
 const colorOf = (id) => (playerById(id) || {}).color || '#555';
 
 function header(title) {
-  const pills = ['submit', 'reveal', 'vote', 'final', 'results'].map((ph) =>
+  const pills = ['submit', 'reveal', 'vote', 'round2', 'final', 'results'].map((ph) =>
     `<button class="${S.phase === ph ? 'on' : ''}" data-phase="${ph}" style="all:unset"><span class="${S.phase === ph ? 'on' : ''}">${PHASE_LABEL[ph]}</span></button>`).join('');
   return `<div class="top">
     <div class="prompt-line"><span class="label">${title || 'PROMPT'}</span><span class="p">${esc(S.prompt)}</span></div>
@@ -136,9 +136,10 @@ function coinsFor(item, max = 12) {
 }
 
 function board() {
+  const r2 = S.phase === 'round2';
   const main = S.standings.main;
-  const top = main.slice(0, 8);
-  const rest = main.slice(8);
+  const top = main.slice(0, r2 ? 10 : 8);
+  const rest = main.slice(top.length);
   const rankColors = ['#FFD23F', '#C9D1E6', '#FF8A3D'];
   const rows = top.map((it, i) => {
     const isTop = it.place <= 3;
@@ -161,28 +162,35 @@ function board() {
 
   const hm = S.standings.hm.map((it) => `<div class="hmrow" data-id="${it.id}"><i style="background:${colorOf(it.owners[0])}"></i><span class="t">${esc(it.text)}</span><span class="px" style="font-size:14px">${it.total}</span></div>`).join('')
     || '<div class="muted" style="font-size:22px">None yet</div>';
-  const spend = S.players.map((p) => `<div style="${p.connected ? '' : 'opacity:.45'}"><i style="background:${p.color}"></i><span>${esc(p.name)}</span><span style="color:${p.used === S.tokens ? 'var(--green)' : 'var(--text)'}">${p.used}/${S.tokens}</span></div>`).join('');
+  const spend = S.players.map((p) => {
+    const used = r2 ? (S.r2.used[p.id] || 0) : p.used, max = r2 ? S.r2.tokens : S.tokens;
+    return `<div style="${p.connected || p.bot ? '' : 'opacity:.45'}"><i style="background:${p.color}"></i><span>${esc(p.name)}</span><span style="color:${used >= max ? 'var(--green)' : 'var(--text)'}">${used}/${max}</span></div>`;
+  }).join('');
 
   return `
   <div class="top">
     <div style="display:flex;align-items:center;gap:16px;min-width:0">
-      <span class="px" style="background:var(--blue);font-size:14px;padding:10px 14px;letter-spacing:4px;flex:none">HIGH SCORES</span>
+      <span class="px" style="background:${r2 ? 'var(--cyan);color:var(--bg)' : 'var(--blue)'};font-size:14px;padding:10px 14px;letter-spacing:4px;flex:none">${r2 ? 'ROUND 2 · TOP 8' : 'ROUND 1 · HIGH SCORES'}</span>
       <span style="font-size:34px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(S.prompt)}</span>
     </div>
-    <div class="phases">${['submit', 'reveal', 'vote', 'final', 'results'].map((ph) => `<button data-phase="${ph}" style="all:unset"><span class="${S.phase === ph ? 'on' : ''}">${PHASE_LABEL[ph]}</span></button>`).join('')}</div>
+    <div class="phases">${['submit', 'reveal', 'vote', 'round2', 'final', 'results'].map((ph) => `<button data-phase="${ph}" style="all:unset"><span class="${S.phase === ph ? 'on' : ''}">${PHASE_LABEL[ph]}</span></button>`).join('')}</div>
   </div>
   <div class="board">
     <div class="rows" id="rows">${rows || '<div class="muted">Waiting for the first tokens…</div>'}${ticker}</div>
     <div class="hmcol">
-      <span class="label" style="line-height:1.6">HONORABLE MENTIONS</span>
+      ${r2 ? `<span class="label" style="line-height:1.6">FINALISTS</span>
+      <div class="muted" style="font-size:22px">The top 8 from round 1 (ties at 8th included). Everyone gets ${S.r2.tokens} fresh tokens — only round 2 counts now.</div>`
+      : `<span class="label" style="line-height:1.6">HONORABLE MENTIONS</span>
       <div id="hm" style="display:flex;flex-direction:column;gap:10px">${hm}</div>
-      <div class="muted" style="font-size:22px">Outscore the lowest main entry to break into the main board.</div>
+      <div class="muted" style="font-size:22px">Outscore the lowest main entry to break into the main board.</div>`}
       <div class="spend"><span class="label" style="color:var(--muted);font-size:10px">TOKENS SPENT</span><div class="g">${spend}</div></div>
     </div>
   </div>
   <div class="bar">
-    <button class="btn ghost" data-to="reveal">PAUSE · ADD PLAYER</button>
-    <button class="btn" data-to="final">CLOSE VOTING ▸</button>
+    ${r2 ? `<button class="btn ghost" data-to="vote">BACK TO ROUND 1</button>
+    <button class="btn" data-to="final">CLOSE VOTING ▸</button>`
+    : `<button class="btn ghost" data-to="reveal">PAUSE · ADD PLAYER</button>
+    <button class="btn cyan" data-to="round2">START ROUND 2 ▸</button>`}
   </div>`;
 }
 
@@ -232,10 +240,87 @@ function confetti() {
   podTimers.push(setTimeout(() => layer.remove(), 5500));
 }
 
+const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : n % 10] || 'th');
+const sameScore = (a, b) => a && b && a.total === b.total && a.backerCount === b.backerCount && !(a.tieDone && b.tieDone);
+// First run of tied entries that touches the podium (places 1-3), in current order.
+function podiumTieGroup(main) {
+  for (let i = 0; i < main.length; i++) {
+    let j = i;
+    while (sameScore(main[j], main[j + 1])) j++;
+    if (j > i && main[i].place <= 3) return main.slice(i, j + 1);
+    i = j;
+  }
+  return null;
+}
+
+// ---------------- TIE-BREAK ----------------
+let decidePick = [];
+let deciding = false;
+function tieScreen() {
+  const t = S.tie;
+  if (!t) return '<div class="big">…</div>';
+  const lead = Math.max(...t.items.map((i) => i.total));
+  const leaders = t.items.filter((i) => i.total === lead).length;
+  const cards = t.items.map((it) => {
+    const coins = S.players.filter((p) => it.backers[p.id]).flatMap((p) => Array(it.backers[p.id]).fill(p.color));
+    const isLead = it.total > 0 && it.total === lead && leaders === 1;
+    return `<div class="tcard ${isLead ? 'lead' : ''}" data-id="${it.id}">
+      <span class="own">${it.owners.map((o) => `<i style="background:${colorOf(o)}"></i>`).join('')}</span>
+      <span class="t">${esc(it.text)}</span>
+      <span class="muted" style="font-size:24px">${it.main} tokens in the main vote</span>
+      <span class="coins">${coins.slice(0, 18).map((c) => coin(c, 40)).join('')}${coins.length > 18 ? `<span class="more">+${coins.length - 18}</span>` : ''}</span>
+      <span class="tt">${it.total}</span>
+    </div>`;
+  }).join('');
+  const spend = S.players.map((p) => {
+    const used = t.used[p.id] || 0, max = t.allowance[p.id] || 3;
+    return `<div style="${p.connected || p.bot ? '' : 'opacity:.45'}"><i style="background:${p.color}"></i><span>${esc(p.name)}</span><span style="color:${used >= max ? 'var(--green)' : 'var(--text)'}">${used}/${max}</span></div>`;
+  }).join('');
+  const bonusName = t.bonus ? esc((playerById(t.bonus.pid) || {}).name || '?') : '';
+  let dialog = '';
+  if (t.closed && t.tied) {
+    const pend = t.bonus && !t.bonus.used;
+    const tiedItems = t.items.filter((i) => t.items.filter((o) => o.total === i.total).length > 1);
+    dialog = `<div class="modal"><div class="dialog" style="border-color:var(--yellow);box-shadow:8px 8px 0 var(--pink)">
+      <span class="px" style="font-size:18px;color:var(--yellow);letter-spacing:3px">STILL TIED!</span>
+      <div class="pair">${tiedItems.map((i) => `<div class="mini" style="display:flex;justify-content:space-between"><span>${esc(i.text)}</span><b class="px" style="font-size:16px">${i.total}</b></div>`).join('<span class="px" style="color:var(--yellow);font-size:12px">VS</span>')}</div>
+      ${pend ? `<div style="display:flex;align-items:center;gap:12px;font-size:26px"><i style="width:18px;height:18px;display:block;background:${colorOf(t.bonus.pid)}"></i><span style="flex:1">Bonus token → <b class="px" style="font-size:12px">${bonusName}</b> · waiting for their pick…</span>${coin('#FFD23F', 36, 1, '#C98A00')}</div>
+        <div class="acts"><button class="btn ghost" data-tieopt="decide">HOST DECIDES</button><button class="btn ghost" data-tieopt="again">VOTE AGAIN</button></div>`
+      : decidePick.length || deciding ? `<span class="muted">Tap the entries in finishing order (best first).</span>
+        <div class="choices">${t.items.map((i) => { const n = decidePick.indexOf(i.id); return `<button class="btn ghost choice ${n >= 0 ? 'picked' : ''}" data-decide="${i.id}">${n >= 0 ? `<b class="px" style="font-size:12px">${ordinal(t.place + n)}</b> ` : ''}${esc(i.text)}</button>`; }).join('')}</div>
+        <div class="acts"><button class="btn ghost" data-tieopt="back">BACK</button></div>`
+      : `<span class="muted">How do you want to settle it?</span>
+        <div class="opts">
+          <button class="opt" data-tieopt="decide"><b>HOST DECIDES</b><span>Pick the order yourself</span></button>
+          <button class="opt hot" data-tieopt="bonus"><b>BONUS TOKEN</b><span>A random player gets 1 extra token to cast</span></button>
+          <button class="opt cy" data-tieopt="again"><b>VOTE AGAIN</b><span>Fresh 3 tokens, round ${t.round + 1}</span></button>
+        </div>`}
+    </div></div>`;
+  }
+  return `
+  <div class="top">
+    <div style="display:flex;align-items:center;gap:16px">
+      <span class="px" style="background:var(--yellow);color:var(--bg);font-size:14px;padding:10px 14px;letter-spacing:4px">TIE BREAKER</span>
+      <span style="font-size:34px">for ${ordinal(t.place)} place · round ${t.round}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px"><div style="width:12px;height:12px;background:var(--pink)"></div><span class="px" style="font-size:11px;color:var(--pink);letter-spacing:2px">${t.closed ? 'CLOSED' : '3 TOKENS EACH · LIVE'}</span></div>
+  </div>
+  <div class="board">
+    <div class="tgrid" style="grid-template-columns:repeat(${t.items.length}, minmax(0, 1fr))">${cards}</div>
+    <div class="hmcol" style="width:240px"><div class="spend" style="margin-top:0"><span class="label" style="font-size:10px">TOKENS SPENT</span><div class="g" style="grid-template-columns:1fr">${spend}</div></div></div>
+  </div>
+  <div class="bar">
+    <span class="grow">Talk it out! Players can move tokens until you close the tie-break.</span>
+    <button class="btn ghost" id="tieCancel">CANCEL</button>
+    <button class="btn" id="tieClose" ${t.closed ? 'disabled' : ''}>CLOSE TIE-BREAK ▸</button>
+  </div>${dialog}`;
+}
+
 // ---------------- FINAL SELECTIONS (host locks the order) ----------------
 function finals() {
-  const main = S.standings.main;
-  const top = main.slice(0, 8);
+  const ids = S.finalIds || [];
+  const main = S.standings.main.filter((i) => ids.includes(i.id));
+  const top = main;
   const rankColors = ['#FFD23F', '#C9D1E6', '#FF8A3D'];
   const rows = top.map((it, i) => {
     const isTop = it.place <= 3;
@@ -245,28 +330,33 @@ function finals() {
       <span class="rk" style="color:${isTop ? rankColors[it.place - 1] : 'var(--muted)'}">#${it.place}</span>
       <span class="ow">${it.owners.map((o) => `<i style="background:${colorOf(o)}"></i>`).join('')}</span>
       <span class="t">${esc(it.text)}</span>
-      ${it.tied ? '<span class="tie">TIE</span>' : ''}
+      <span class="backers" title="${it.backerCount} players backed this">${S.players.filter((p) => it.backers[p.id]).map((p) => coin(p.color, 28)).join('')}</span>
+      <span class="sharecell">${i > 0 ? `<button class="share ${it.shared ? 'on' : ''}" data-share="${it.id}" aria-pressed="${!!it.shared}" title="Share a place with the entry above">=${it.shared ? ' SHARED' : ''}</button>` : ''}</span>
+      <span class="tagcell">${it.tied ? '<span class="tie">TIE</span>' : it.tb != null ? `<span class="tie tbdone">TB ${it.tb}</span>` : ''}</span>
       <span class="tot">${it.total}</span>
       <span class="ctl">
-        ${i > 0 ? `<button class="share ${it.shared ? 'on' : ''}" data-share="${it.id}" aria-pressed="${!!it.shared}" title="Share a place with the entry above">=${it.shared ? ' SHARED' : ''}</button>` : '<span style="width:44px"></span>'}
         <button data-move="${it.id}" data-dir="-1" ${i ? '' : 'disabled'} aria-label="Move up">▲</button>
         <button data-move="${it.id}" data-dir="1" ${i < top.length - 1 ? '' : 'disabled'} aria-label="Move down">▼</button>
       </span>
     </div>`;
   }).join('');
   const ties = top.filter((i) => i.tied).length;
+  const group = podiumTieGroup(main);
   return `
   <div class="top">
     <div style="display:flex;align-items:center;gap:16px;min-width:0">
       <span class="px" style="background:var(--pink);color:var(--bg);font-size:14px;padding:10px 14px;letter-spacing:4px;flex:none">FINAL SELECTIONS</span>
       <span style="font-size:34px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(S.prompt)}</span>
     </div>
-    <div class="phases">${['submit', 'reveal', 'vote', 'final', 'results'].map((ph) => `<button data-phase="${ph}" style="all:unset"><span class="${S.phase === ph ? 'on' : ''}">${PHASE_LABEL[ph]}</span></button>`).join('')}</div>
+    <div class="phases">${['submit', 'reveal', 'vote', 'round2', 'final', 'results'].map((ph) => `<button data-phase="${ph}" style="all:unset"><span class="${S.phase === ph ? 'on' : ''}">${PHASE_LABEL[ph]}</span></button>`).join('')}</div>
   </div>
-  <div class="rows" id="rows" style="flex:1;min-height:0">${rows || '<div class="muted">No entries.</div>'}</div>
+  <div class="rows" id="rows" style="flex:1;min-height:0;gap:7px">
+    ${rows ? `<div class="frow fhead" aria-hidden="true"><span></span><span></span><span></span><span></span><span class="lbl">VOTERS</span><span></span><span></span><span class="lbl" style="text-align:right">TOKENS</span><span></span></div>` : ''}
+    ${rows || '<div class="muted">No entries.</div>'}</div>
   <div class="bar">
-    <span class="grow">${ties ? `${ties} tied entries · drag or use ▲▼ to break ties · = shares a place` : 'Drag or use ▲▼ to set the final order'}</span>
-    <button class="btn ghost" data-to="vote">BACK TO VOTING</button>
+    <span class="grow">${group ? `Tie for ${ordinal(group[0].place)}: ${group.map((i) => esc(i.text)).join(' / ')} · override, share, or send to vote` : ties ? `${ties} tied entries · drag or use ▲▼ to break ties · = shares a place` : 'Drag or use ▲▼ to set the final order'}</span>
+    ${group ? `<button class="btn cyan" data-tie="${group.map((i) => i.id).join(',')}">SEND TIE TO VOTE ▸</button>` : ''}
+    <button class="btn ghost" data-to="round2">BACK TO ROUND 2</button>
     <button class="btn yellow" data-to="results">REVEAL PODIUM ▸</button>
   </div>`;
 }
@@ -287,19 +377,19 @@ function podium() {
     return `<div class="pod ${anim ? 'anim' : ''}" style="--d:${d}s;--rise:${POD.rise}s">
       <span class="t">${esc(it.text)}</span>
       <span class="own">${it.owners.map((o) => `<i style="background:${colorOf(o)}"></i>`).join('')}</span>
-      <div class="blk" style="height:${heights[place]}px;background:${colors[place]}"><b>${it.place}</b><span><em class="count" data-total="${it.total}" data-delay="${d + POD.rise}">${anim ? 0 : it.total}</em> TOKENS</span></div>
+      <div class="blk" style="height:${heights[place]}px;background:${colors[place]}"><b>${it.place}</b><span><em class="count" data-total="${it.total}" data-delay="${d + POD.rise}">${anim ? 0 : it.total}</em> TOKENS</span>${it.tb != null ? `<span class="tbbadge">TIE-BREAK ${it.tb}</span>` : ''}</div>
     </div>`;
   }).join('');
-  const rest = main.slice(3, 8).map((it) => `${it.place} ${esc(it.text)}`).join(' · ');
+  const rest = main.slice(3, 8).map((it) => `${it.place} ${esc(it.text)}${it.tb != null ? ` (${it.total} · tie-break ${it.tb})` : ''}`).join(' · ');
   return `<div class="results" style="position:absolute;inset:0;padding:32px 56px;display:flex;flex-direction:column;align-items:center;gap:14px">
     <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
       <span class="px" style="background:var(--blue);font-size:16px;padding:10px 16px;letter-spacing:6px">FINAL SCORES</span>
       <span class="muted" style="font-size:32px">${esc(S.prompt)}</span>
     </div>
     <div class="podium">${pods || '<div class="muted">No entries this round.</div>'}</div>
-    <div class="final" style="width:100%">
-      <span class="muted" style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${rest}</span>
-      <div style="display:flex;gap:14px;align-items:center;flex:none">
+    <div class="final" style="width:100%;flex-direction:column;gap:12px">
+      <span class="muted" style="width:100%;text-align:center;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${rest}</span>
+      <div style="display:flex;gap:14px;align-items:center;justify-content:center;flex:none">
         <button class="btn ghost" id="endSession">END SESSION</button>
         <button class="btn ghost" data-to="final">BACK</button>
         <input id="nextPrompt" class="field" style="width:280px;font-size:26px;padding:8px 12px" maxlength="80" placeholder="Next prompt">
@@ -324,12 +414,14 @@ function render() {
   // drop selections that no longer exist
   selected = new Set([...selected].filter((id) => S.items.some((i) => i.id === id && i.revealed && !i.merged)));
 
-  const play = ['vote', 'final'].includes(S.phase) && lastPhase === S.phase ? flipAnimate(stage, '[data-id]', scale) : null;
+  const play = ['vote', 'round2', 'final'].includes(S.phase) && lastPhase === S.phase ? flipAnimate(stage, '[data-id]', scale) : null;
   stage.classList.toggle('results', false);
   podiumAnimate = S.phase === 'results' && lastPhase !== 'results';
   if (S.phase !== 'results') { podTimers.forEach(clearTimeout); podTimers = []; }
   const keepConfetti = S.phase === 'results' && stage.querySelector('.confetti');
-  stage.innerHTML = { lobby, submit: wall, reveal: wall, vote: board, final: finals, results: podium }[S.phase]();
+  stage.innerHTML = { lobby, submit: wall, reveal: wall, vote: board, round2: board, final: finals, tiebreak: tieScreen, results: podium }[S.phase]();
+  stage.classList.toggle('tiebg', S.phase === 'tiebreak');
+  if (S.phase !== 'tiebreak') { decidePick = []; deciding = false; }
   if (keepConfetti) stage.appendChild(keepConfetti);
   if (podiumAnimate) runPodium();
   if (play) play();
@@ -385,6 +477,19 @@ stage.addEventListener('click', async (e) => {
       return host('setOrder', { order: ids });
     }
     if (t.dataset.share) return host('toggleShare', { item: t.dataset.share });
+    if (t.dataset.tie) return host('startTie', { items: t.dataset.tie.split(',') });
+    if (t.id === 'tieClose') return host('closeTie');
+    if (t.id === 'tieCancel') { if (confirm('Cancel the tie-break and go back to final selections?')) return host('cancelTie'); return; }
+    if (t.dataset.tieopt === 'decide') { decidePick = []; deciding = true; return render(); }
+    if (t.dataset.tieopt === 'back') { decidePick = []; deciding = false; return render(); }
+    if (t.dataset.tieopt === 'bonus') return host('tieBonus');
+    if (t.dataset.tieopt === 'again') { deciding = false; return host('tieAgain'); }
+    if (t.dataset.decide) {
+      const id = t.dataset.decide;
+      decidePick = decidePick.includes(id) ? decidePick.filter((x) => x !== id) : decidePick.concat(id);
+      if (decidePick.length === S.tie.items.length) { const order = decidePick; decidePick = []; deciding = false; return host('tieDecide', { order }); }
+      return render();
+    }
     if (t.id === 'endSession') {
       if (!confirm('End this session? Everyone is sent out and a fresh room with a new code opens.')) return;
       await host('endRoom');
@@ -525,7 +630,8 @@ function sounds(prev, next) {
   if (up(next) > up(prev)) Sfx.flip();
   const promo = (st) => st.standings.main.filter((i) => i.promoted).map((i) => i.id).join();
   if (next.phase === 'vote' && promo(next) && promo(next) !== promo(prev)) return Sfx.promote();
-  const spent = (st) => st.players.reduce((n, p) => n + p.used, 0);
+  const sum = (o) => Object.values(o || {}).reduce((n, v) => n + v, 0);
+  const spent = (st) => st.players.reduce((n, p) => n + p.used, 0) + sum(st.r2 && st.r2.used) + sum(st.tie && st.tie.used);
   if (spent(next) > spent(prev)) Sfx.coin();
   else if (spent(next) < spent(prev)) Sfx.uncoin();
 }
@@ -550,7 +656,7 @@ function renderSettings() {
   const room = S ? 10 - S.players.length : 0;
   const tog = (key, on, label) => `<button class="tog ${on ? 'on' : ''}" data-set="${key}" aria-pressed="${on}"><span>${label}</span><b>${on ? 'ON' : 'OFF'}</b></button>`;
   panel.innerHTML = `
-    <div class="shead"><span class="px" style="font-size:12px;letter-spacing:2px">SETTINGS <span style="color:var(--muted);font-size:9px">v${esc(window.APP_VERSION)}</span></span><button class="x" data-set="close" aria-label="Close settings">✕</button></div>
+    <div class="shead"><span class="px" style="font-size:12px;letter-spacing:2px">SETTINGS <span style="color:var(--muted);font-size:9px">v${esc(window.APP_VERSION)}</span></span><button class="pxclose" data-set="close" aria-label="Close settings"><svg width="20" height="20" viewBox="0 0 7 7" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M0 0h2v1h-2zM5 0h2v1h-2zM1 1h2v1h-2zM4 1h2v1h-2zM2 2h3v1h-3zM3 3h1v1h-1zM2 4h3v1h-3zM1 5h2v1h-2zM4 5h2v1h-2zM0 6h2v1h-2zM5 6h2v1h-2z"/></svg></button></div>
     ${auth ? `<span class="label">ROOM</span>
     <div class="sroom">
       <div class="code small">${auth.code.split('').map((c) => `<b>${c}</b>`).join('')}</div>

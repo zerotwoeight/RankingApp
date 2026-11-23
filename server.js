@@ -17,7 +17,11 @@ const TOKENS = 6;
 const MAIN_PER_PLAYER = 3;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 const COLORS = ['#FF2E88', '#29E6FF', '#FFD23F', '#3DFF8A', '#FF8A3D', '#A78BFF', '#F4F1FF', '#4D7BFF', '#FF5C5C', '#7DF9C4'];
-const PHASES = ['lobby', 'submit', 'reveal', 'vote', 'final', 'results'];
+const PHASES = ['lobby', 'submit', 'reveal', 'vote', 'round2', 'final', 'tiebreak', 'results'];
+const R2_TOKENS = 3;
+const R2_SIZE = 8;
+const R2_PHASES = ['round2', 'final', 'tiebreak', 'results'];
+const TIE_TOKENS = 3;
 
 const rooms = new Map();
 const id = (n = 8) => crypto.randomBytes(n).toString('hex');
@@ -32,7 +36,7 @@ function newCode() {
 function makeRoom() {
   const room = {
     code: newCode(), hostKey: id(12), phase: 'lobby', prompt: '', round: 1,
-    players: {}, items: {}, order: 0, finalOrder: null, shared: [], touched: Date.now(), clients: new Set()
+    players: {}, items: {}, order: 0, finalOrder: null, shared: [], r2: null, finalIds: null, touched: Date.now(), clients: new Set()
   };
   rooms.set(room.code, room);
   return room;
@@ -53,20 +57,44 @@ function itemTotals(room) {
 }
 
 function cmp(a, b) {
-  return b.total - a.total || b.backerCount - a.backerCount || (b.bump || 0) - (a.bump || 0) || a.order - b.order;
+  return b.total - a.total || b.backerCount - a.backerCount || (b.r1 || 0) - (a.r1 || 0) || (b.bump || 0) - (a.bump || 0) || a.order - b.order;
 }
+
+// Round 2 tallies: only the top-8 finalists, 3 tokens per player.
+function r2Totals(room) {
+  const totals = {}, backers = {};
+  for (const id of room.r2.ids) { totals[id] = 0; backers[id] = {}; }
+  for (const [pid, m] of Object.entries(room.r2.tokens)) {
+    for (const [id, n] of Object.entries(m)) {
+      if (!(id in totals) || n <= 0) continue;
+      totals[id] += n; backers[id][pid] = n;
+    }
+  }
+  return { totals, backers };
+}
+const r2Used = (room, pid) => Object.values((room.r2 && room.r2.tokens[pid]) || {}).reduce((s, n) => s + n, 0);
 
 // Returns { main: [...], hm: [...] } sorted, with honorable-mention promotion applied.
 function standings(room) {
   const t = itemTotals(room);
   const list = Object.values(room.items).filter((i) => !i.merged && (i.revealed || room.phase === 'results')).map((i) => ({
-    id: i.id, text: i.text, owners: i.owners, hm: i.hm, order: i.order, bump: i.bump || 0,
+    id: i.id, text: i.text, owners: i.owners, hm: i.hm, order: i.order, bump: i.bump || 0, tb: i.tbCount ?? null, tieDone: !!i.tieDone,
     total: t[i.id].total, backers: t[i.id].backers, backerCount: Object.keys(t[i.id].backers).length
   }));
-  let main = list.filter((i) => !i.hm).sort(cmp);
-  let hm = list.filter((i) => i.hm).sort(cmp);
+  let main, hm;
+  if (room.r2 && R2_PHASES.includes(room.phase)) {
+    // Round 2: only finalists, scored by round 2 tokens (round 1 total breaks exact ties).
+    const { totals, backers } = r2Totals(room);
+    main = list.filter((i) => room.r2.ids.includes(i.id)).map((i) => ({
+      ...i, r1: i.total, r1backers: i.backers, total: totals[i.id], backers: backers[i.id], backerCount: Object.keys(backers[i.id]).length
+    })).sort(cmp);
+    hm = [];
+  } else {
+    main = list.filter((i) => !i.hm).sort(cmp);
+    hm = list.filter((i) => i.hm).sort(cmp);
+  }
   // Promotion: an HM that outscores the lowest main entry swaps with it.
-  let guard = 100;
+  let guard = room.r2 && R2_PHASES.includes(room.phase) ? 0 : 100;
   while (hm.length && main.length && guard--) {
     const lowMain = main[main.length - 1];
     const topHm = hm[0];
@@ -76,10 +104,10 @@ function standings(room) {
     } else break;
   }
   // Natural ties: same total and same number of backers as a neighbour.
-  const same = (a, b) => a && b && a.total === b.total && a.backerCount === b.backerCount;
+  const same = (a, b) => a && b && a.total === b.total && a.backerCount === b.backerCount && (a.r1 || 0) === (b.r1 || 0) && !(a.tieDone && b.tieDone);
   main.forEach((it, i) => { it.tied = same(it, main[i - 1]) || same(it, main[i + 1]); });
 
-  if (room.finalOrder && ['final', 'results'].includes(room.phase)) {
+  if (room.finalOrder && ['final', 'tiebreak', 'results'].includes(room.phase)) {
     // Host has locked the order on the Final Selections screen.
     const idx = new Map(room.finalOrder.map((x, i) => [x, i]));
     main.sort((a, b) => (idx.has(a.id) ? idx.get(a.id) : 1e6) - (idx.has(b.id) ? idx.get(b.id) : 1e6) || cmp(a, b));
@@ -109,7 +137,7 @@ function hostView(room) {
     text: i.revealed ? i.text : null
   }));
   return {
-    role: 'host', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
+    role: 'host', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round, tie: tieView(room), r2: r2View(room), finalIds: room.finalIds || null,
     players: publicPlayers(room), items, standings: standings(room), colors: COLORS, tokens: TOKENS
   };
 }
@@ -121,10 +149,68 @@ function playerView(room, pid) {
     text: i.revealed || i.submitter === pid ? i.text : null
   }));
   return {
-    role: 'player', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round,
+    role: 'player', version: VERSION, code: room.code, phase: room.phase, prompt: room.prompt, round: room.round, tie: tieView(room, pid), r2: r2View(room, pid),
     me: me ? { id: me.id, name: me.name, color: me.color, tokens: me.tokens, done: !!me.done } : null,
     players: publicPlayers(room), items, standings: standings(room), colors: COLORS, tokens: TOKENS
   };
+}
+
+function r2View(room, pid) {
+  if (!room.r2) return null;
+  return {
+    ids: room.r2.ids, tokens: R2_TOKENS,
+    used: Object.fromEntries(Object.keys(room.players).map((p) => [p, r2Used(room, p)])),
+    mine: pid ? (room.r2.tokens[pid] || {}) : undefined
+  };
+}
+
+// ---------- tie-break ----------
+function tieTotals(room) {
+  const t = room.tie;
+  const totals = {}, backers = {};
+  for (const id of t.ids) { totals[id] = 0; backers[id] = {}; }
+  for (const [pid, m] of Object.entries(t.tokens)) {
+    for (const [id, n] of Object.entries(m)) {
+      if (!(id in totals) || n <= 0) continue;
+      totals[id] += n; backers[id][pid] = n;
+    }
+  }
+  return { totals, backers };
+}
+const tieAllowance = (t, pid) => TIE_TOKENS + (t.bonus && t.bonus.pid === pid ? 1 : 0);
+const tieUsed = (t, pid) => Object.values(t.tokens[pid] || {}).reduce((s, n) => s + n, 0);
+function tieIsTied(room) {
+  const { totals } = tieTotals(room);
+  const v = Object.values(totals);
+  return new Set(v).size !== v.length;
+}
+
+function tieView(room, pid) {
+  const t = room.tie;
+  if (!t) return null;
+  const { totals, backers } = tieTotals(room);
+  const main = standings(room).main;
+  return {
+    ids: t.ids, round: t.round, place: t.place, closed: t.closed, tied: t.closed && tieIsTied(room),
+    bonus: t.bonus ? { pid: t.bonus.pid, used: tieUsed(t, t.bonus.pid) >= tieAllowance(t, t.bonus.pid) } : null,
+    items: t.ids.map((id) => { const m = main.find((x) => x.id === id) || {}; return { id, text: m.text, owners: m.owners || [], main: m.total || 0, total: totals[id], backers: backers[id] }; }),
+    used: Object.fromEntries(Object.keys(room.players).map((p) => [p, tieUsed(t, p)])),
+    allowance: Object.fromEntries(Object.keys(room.players).map((p) => [p, tieAllowance(t, p)])),
+    mine: pid ? (t.tokens[pid] || {}) : undefined
+  };
+}
+
+// Put the tied entries in tie-break order inside the slots they already hold.
+function applyTie(room, orderIds) {
+  const t = room.tie;
+  const { totals } = tieTotals(room);
+  const ids = orderIds || [...t.ids].sort((a, b) => totals[b] - totals[a] || room.finalOrder.indexOf(a) - room.finalOrder.indexOf(b));
+  const slots = t.ids.map((id) => room.finalOrder.indexOf(id)).sort((a, b) => a - b);
+  slots.forEach((slot, i) => { room.finalOrder[slot] = ids[i]; });
+  for (const id of t.ids) { if (room.items[id]) { room.items[id].tbCount = totals[id]; room.items[id].tieDone = true; } }
+  room.shared = (room.shared || []).filter((x) => !t.ids.includes(x));
+  room.tie = null;
+  room.phase = 'final';
 }
 
 function broadcast(room) {
@@ -191,12 +277,27 @@ const actions = {
     const r = asHost(b);
     need(PHASES.includes(b.phase), 'Bad phase');
     if (b.phase === 'submit') need(r.prompt, 'Set a prompt first');
-    if (b.phase === 'final' && r.phase !== 'results') {
-      r.phase = 'vote';
-      r.finalOrder = standings(r).main.map((i) => i.id);
-      // ties start as shared places; the host splits them on the Final Selections screen
-      r.shared = standings(r).main.filter((it, i, a) => i > 0 && a[i - 1].total === it.total && a[i - 1].backerCount === it.backerCount).map((i) => i.id);
+    need(b.phase !== 'tiebreak', 'Start a tie-break from final selections');
+    if (r.tie) r.tie = null;
+    if (b.phase === 'round2' && !R2_PHASES.includes(r.phase)) {
+      // Finalists: everything placed in the top 8 after round 1, ties at 8th included.
+      const main = standings(r).main;
+      r.r2 = { ids: main.filter((it) => it.place <= R2_SIZE).map((it) => it.id), tokens: {} };
+      r.finalOrder = null; r.finalIds = null; r.shared = [];
+      for (const it of Object.values(r.items)) { delete it.tbCount; delete it.tieDone; }
     }
+    if (b.phase === 'final' && !['final', 'tiebreak', 'results'].includes(r.phase)) {
+      need(r.r2, 'Run round 2 first');
+      for (const it of Object.values(r.items)) { delete it.tbCount; delete it.tieDone; }
+      r.phase = 'round2';
+      const main = standings(r).main;
+      r.finalOrder = main.map((i) => i.id);
+      // ties start as shared places; the host splits them on the Final Selections screen
+      r.shared = main.filter((it, i, a) => i > 0 && a[i - 1].place === it.place).map((i) => i.id);
+      // Final Selections shows the top 3 plus anything tied into a top-3 place.
+      r.finalIds = main.filter((it) => it.place <= 3).map((it) => it.id);
+    }
+    if (['final', 'tiebreak', 'results'].includes(b.phase)) need(r.r2, 'Run round 2 first');
     r.phase = b.phase;
     broadcast(r);
     return {};
@@ -204,7 +305,7 @@ const actions = {
 
   submit(b) {
     const [r, p] = asPlayer(b);
-    need(['lobby', 'submit', 'reveal'].includes(r.phase), 'Submissions are closed');
+    need(['submit', 'reveal'].includes(r.phase), r.phase === 'lobby' ? 'Wait for the host to start' : 'Submissions are closed');
     need(!p.done, 'You marked yourself done — tap DONE to reopen');
     const text = clean(b.text, 48);
     need(text, 'Type something');
@@ -374,6 +475,101 @@ const actions = {
     return {};
   },
 
+  r2Token(b) {
+    const [r, p] = asPlayer(b);
+    need(r.phase === 'round2' && r.r2, 'Round 2 is not open');
+    need(r.r2.ids.includes(b.item), 'Not a finalist');
+    const mine = (r.r2.tokens[p.id] = r.r2.tokens[p.id] || {});
+    const cur = mine[b.item] || 0;
+    if (b.delta > 0) need(r2Used(r, p.id) < R2_TOKENS, 'No round 2 tokens left');
+    else need(cur > 0, 'No token there');
+    mine[b.item] = cur + (b.delta > 0 ? 1 : -1);
+    if (!mine[b.item]) delete mine[b.item];
+    broadcast(r);
+    return {};
+  },
+
+  // ----- tie-break -----
+  startTie(b) {
+    const r = asHost(b);
+    need(r.phase === 'final', 'Only from final selections');
+    const ids = (b.items || []).filter((x) => r.items[x] && !r.items[x].merged);
+    need(ids.length >= 2, 'Pick at least two tied entries');
+    const main = standings(r).main;
+    const place = Math.min(...ids.map((id) => (main.find((m) => m.id === id) || {}).place || 99));
+    r.tie = { ids, round: 1, place, tokens: {}, closed: false, bonus: null };
+    r.phase = 'tiebreak';
+    broadcast(r);
+    return {};
+  },
+
+  tieToken(b) {
+    const [r, p] = asPlayer(b);
+    const t = r.tie;
+    need(r.phase === 'tiebreak' && t, 'No tie-break running');
+    need(t.ids.includes(b.item), 'Not in this tie-break');
+    const bonusTurn = t.closed && t.bonus && t.bonus.pid === p.id;
+    need(!t.closed || bonusTurn, 'The tie-break is closed');
+    const used = tieUsed(t, p.id);
+    const mine = (t.tokens[p.id] = t.tokens[p.id] || {});
+    const cur = mine[b.item] || 0;
+    if (b.delta > 0) need(used < tieAllowance(t, p.id), 'No tie-break tokens left');
+    else { need(cur > 0, 'No token there'); need(!bonusTurn, 'Your other tokens are locked'); }
+    mine[b.item] = cur + (b.delta > 0 ? 1 : -1);
+    if (!mine[b.item]) delete mine[b.item];
+    // The bonus token was the decider: if it breaks the tie, finish automatically.
+    if (bonusTurn && tieUsed(t, p.id) >= tieAllowance(t, p.id) && !tieIsTied(r)) applyTie(r);
+    broadcast(r);
+    return {};
+  },
+
+  closeTie(b) {
+    const r = asHost(b);
+    need(r.phase === 'tiebreak' && r.tie, 'No tie-break running');
+    if (tieIsTied(r)) r.tie.closed = true; else applyTie(r);
+    broadcast(r);
+    return { stillTied: r.phase === 'tiebreak' };
+  },
+
+  tieDecide(b) {
+    const r = asHost(b);
+    need(r.phase === 'tiebreak' && r.tie, 'No tie-break running');
+    const order = (b.order || []).filter((x) => r.tie.ids.includes(x));
+    need(order.length === r.tie.ids.length, 'Order every tied entry');
+    applyTie(r, order);
+    broadcast(r);
+    return {};
+  },
+
+  tieBonus(b) {
+    const r = asHost(b);
+    const t = r.tie;
+    need(r.phase === 'tiebreak' && t && t.closed, 'Close the tie-break first');
+    let pool = Object.values(r.players).filter((p) => p.connected || p.bot);
+    if (!pool.length) pool = Object.values(r.players);
+    need(pool.length, 'No players in the room');
+    t.bonus = { pid: pick(pool).id };
+    broadcast(r);
+    return { pid: t.bonus.pid };
+  },
+
+  tieAgain(b) {
+    const r = asHost(b);
+    const t = r.tie;
+    need(r.phase === 'tiebreak' && t, 'No tie-break running');
+    t.round += 1; t.tokens = {}; t.closed = false; t.bonus = null;
+    broadcast(r);
+    return {};
+  },
+
+  cancelTie(b) {
+    const r = asHost(b);
+    r.tie = null;
+    if (r.phase === 'tiebreak') r.phase = 'final';
+    broadcast(r);
+    return {};
+  },
+
   bump(b) {
     // Host tie-break: lift an item above the items it is tied with.
     const r = asHost(b);
@@ -390,6 +586,9 @@ const actions = {
     r.order = 0;
     r.round += 1;
     r.finalOrder = null;
+    r.tie = null;
+    r.r2 = null;
+    r.finalIds = null;
     r.shared = [];
     r.prompt = clean(b.prompt, 80);
     for (const p of Object.values(r.players)) { p.tokens = {}; p.done = false; }
@@ -504,6 +703,21 @@ function botTick(r) {
     } else if (r.phase === 'reveal' && chance(0.3)) {
       const down = mine.find((i) => !i.revealed);
       if (down) { down.revealed = true; changed = true; }
+    } else if (r.phase === 'round2' && r.r2) {
+      if (r2Used(r, p.id) < R2_TOKENS && chance(0.3)) {
+        const id = pick(r.r2.ids);
+        const mine = (r.r2.tokens[p.id] = r.r2.tokens[p.id] || {});
+        mine[id] = (mine[id] || 0) + 1; changed = true;
+      }
+    } else if (r.phase === 'tiebreak' && r.tie) {
+      const t = r.tie;
+      const bonusTurn = t.closed && t.bonus && t.bonus.pid === p.id;
+      if ((!t.closed || bonusTurn) && tieUsed(t, p.id) < tieAllowance(t, p.id) && chance(bonusTurn ? 0.5 : 0.3)) {
+        const id = pick(t.ids);
+        const mine = (t.tokens[p.id] = t.tokens[p.id] || {});
+        mine[id] = (mine[id] || 0) + 1; changed = true;
+        if (bonusTurn && !tieIsTied(r)) applyTie(r);
+      }
     } else if (r.phase === 'vote') {
       const pool = Object.values(r.items).filter((i) => i.revealed && !i.merged);
       if (!pool.length) continue;

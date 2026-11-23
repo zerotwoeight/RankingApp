@@ -163,6 +163,71 @@ function voteHtml() {
     <div class="wait" style="font-size:22px">Move tokens anytime until the host closes voting.</div>`;
 }
 
+function r2Html() {
+  const r = S.r2;
+  const mine = r.mine || {};
+  const used = Object.values(mine).reduce((a, n) => a + n, 0);
+  const left = r.tokens - used;
+  const coins = Array.from({ length: r.tokens }, (_, i) => coin('#FFD23F', 48, i < left ? 1 : 0.18, '#C98A00')).join('');
+  const rows = S.items.filter((it) => r.ids.includes(it.id)).map((it) => {
+    const n = mine[it.id] || 0;
+    const owner = (S.players.find((p) => p.id === it.owners[0]) || {}).color || '#555';
+    return `<div class="vote ${n ? 'on' : ''}">
+      <i style="background:${owner}"></i>
+      <span class="t">${esc(it.text)}</span>
+      <button class="minus" data-r2="${it.id}" data-d="-1" ${n ? '' : 'disabled'} aria-label="Remove a round 2 token from ${esc(it.text)}">−</button>
+      <span class="n" style="color:${n ? 'var(--yellow)' : 'var(--muted)'}">${n}</span>
+      <button class="plus" data-r2="${it.id}" data-d="1" ${left ? '' : 'disabled'} aria-label="Add a round 2 token to ${esc(it.text)}">+</button>
+    </div>`;
+  }).join('');
+  return `
+    <div style="text-align:center;display:flex;flex-direction:column;gap:8px">
+      <span class="px" style="font-size:14px;color:var(--cyan);line-height:1.5">ROUND 2 · TOP 8</span>
+      <span class="muted" style="font-size:24px">Fresh ${r.tokens} tokens. Only this round counts!</span>
+    </div>
+    <div class="coinbar" style="border-color:var(--cyan)">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="label" style="font-size:10px">ROUND 2 TOKENS</span><span class="px" style="font-size:12px;color:var(--yellow)">${left} LEFT</span></div>
+      <div class="coins">${coins}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+    <div class="wait" style="font-size:22px">Move tokens anytime until the host closes voting.</div>`;
+}
+
+function tieHtml() {
+  const t = S.tie;
+  if (!t) return '<div class="wait">…</div>';
+  const mine = t.mine || {};
+  const used = Object.values(mine).reduce((a, n) => a + n, 0);
+  const max = t.allowance[S.me.id] || 3;
+  const left = max - used;
+  const myBonus = t.bonus && t.bonus.pid === S.me.id && !t.bonus.used;
+  const locked = t.closed && !myBonus;
+  const ord = (n) => n + (['th', 'st', 'nd', 'rd'][n % 10] && !(n % 100 > 10 && n % 100 < 14) ? ['th', 'st', 'nd', 'rd'][n % 10] : 'th');
+  const coins = Array.from({ length: max }, (_, i) => coin('#FFD23F', 48, i < left ? 1 : 0.18, '#C98A00')).join('');
+  const rows = t.items.map((it) => {
+    const n = mine[it.id] || 0;
+    const owner = (S.players.find((p) => p.id === it.owners[0]) || {}).color || '#555';
+    return `<div class="vote big ${n ? 'on' : ''}">
+      <i style="background:${owner}"></i>
+      <span class="t">${esc(it.text)}</span>
+      <button class="minus" data-tie="${it.id}" data-d="-1" ${n && !locked && !myBonus ? '' : 'disabled'} aria-label="Remove a tie-break token from ${esc(it.text)}">−</button>
+      <span class="n" style="color:${n ? 'var(--yellow)' : 'var(--muted)'}">${n}</span>
+      <button class="plus" data-tie="${it.id}" data-d="1" ${left > 0 && !locked ? '' : 'disabled'} aria-label="Add a tie-break token to ${esc(it.text)}">+</button>
+    </div>`;
+  }).join('');
+  return `
+    <div style="text-align:center;display:flex;flex-direction:column;gap:8px">
+      <span class="px" style="font-size:14px;color:var(--yellow);line-height:1.5">${myBonus ? 'BONUS TOKEN!' : `TIE FOR ${ord(t.place).toUpperCase()}!`}</span>
+      <span class="muted" style="font-size:24px">${myBonus ? 'You were picked to break the tie. Cast your extra token!' : t.closed ? 'Tie-break closed — eyes on the shared screen.' : `Spend ${max} tokens to break it · round ${t.round}`}</span>
+    </div>
+    <div class="coinbar" style="border-color:var(--yellow)">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="label" style="font-size:10px">TIE TOKENS</span><span class="px" style="font-size:12px;color:var(--yellow)">${left} LEFT</span></div>
+      <div class="coins">${coins}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">${rows}</div>
+    <div class="wait" style="font-size:22px">${locked ? 'Waiting for the host…' : 'Debate it out — move tokens until the host closes the tie-break.'}</div>`;
+}
+
 function resultsHtml() {
   const top = S.standings.main.slice(0, 3);
   const medal = ['#FFD23F', '#C9D1E6', '#FF8A3D'];
@@ -180,10 +245,12 @@ function render() {
   const draft = typing ? document.activeElement.value : '';
   const scrollY = window.scrollY;
   let body = '';
-  if (S.phase === 'lobby') body = `${promptHtml()}<div class="big" style="margin-top:30px">YOU'RE IN!</div>${entriesHtml(false, !!S.prompt)}<div class="wait">Waiting for the host to start…</div>`;
+  if (S.phase === 'lobby') body = `<div class="big" style="margin-top:30px">YOU'RE IN!</div><div class="wait">Waiting for the host to start…</div>`;
   else if (S.phase === 'submit') body = `${promptHtml()}${entriesHtml(false, !S.me.done)}<div class="wait" style="font-size:22px">${S.me.done ? 'Locked in! Tap DONE ✓ up top if you need to change something.' : 'Tap SUBMIT up top when you are done. Cards stay face-down until you flip them.'}</div>`;
   else if (S.phase === 'reveal') body = `${promptHtml()}<div class="big">FLIP WHEN<br>YOU'RE READY</div>${entriesHtml(true, !S.me.done)}<div class="wait">Waiting for host to open voting…</div>`;
   else if (S.phase === 'vote') body = voteHtml();
+  else if (S.phase === 'round2') body = r2Html();
+  else if (S.phase === 'tiebreak') body = tieHtml();
   else if (S.phase === 'final') body = `${promptHtml()}<div class="big" style="margin-top:30px">VOTING CLOSED</div><div class="wait">The host is locking in the final order… eyes on the shared screen!</div>`;
   else body = resultsHtml();
   app.innerHTML = headerHtml() + body;
@@ -213,6 +280,8 @@ app.addEventListener('click', async (e) => {
     if (b.dataset.flip) return act('flip', { item: b.dataset.flip });
     if (b.dataset.del) return act('editMine', { item: b.dataset.del, remove: true });
     if (b.dataset.tok) return act('token', { item: b.dataset.tok, delta: Number(b.dataset.d) });
+    if (b.dataset.r2) return act('r2Token', { item: b.dataset.r2, delta: Number(b.dataset.d) });
+    if (b.dataset.tie) return act('tieToken', { item: b.dataset.tie, delta: Number(b.dataset.d) });
   } catch { /* toast shown */ }
 });
 

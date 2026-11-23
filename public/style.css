@@ -263,3 +263,49 @@ button:not(:disabled):hover { filter: brightness(1.12); }
 /* version tag */
 .ver { position: fixed; left: 10px; bottom: 8px; z-index: 30; font-family: var(--pixel); font-size: 9px; color: var(--muted); opacity: .7; pointer-events: none; }
 .phonever { position: static; text-align: center; padding: 0 0 14px; }
+
+/* tie-break */
+.stage.tiebg::before { content: ''; position: absolute; inset: 0; z-index: -1; background-image: linear-gradient(rgba(255,46,136,.10) 1px, transparent 1px), linear-gradient(90deg, rgba(255,46,136,.10) 1px, transparent 1px); background-size: 40px 40px; }
+.stage { isolation: isolate; }
+.tgrid { flex: 1 1 0; min-width: 0; display: grid; gap: 24px; }
+.tcard { display: flex; flex-direction: column; gap: 14px; background: var(--panel); border: 3px solid var(--blue); box-shadow: 8px 8px 0 #000; padding: 24px; min-width: 0; transition: border-color .2s, box-shadow .2s; }
+.tcard.lead { background: rgba(255,210,63,.10); border-color: var(--yellow); box-shadow: 8px 8px 0 var(--pink); }
+.tcard .own { display: flex; gap: 6px; }
+.tcard .own i { width: 32px; height: 10px; display: block; }
+.tcard .t { font-size: 52px; line-height: .95; overflow-wrap: anywhere; }
+.tcard .coins { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; min-height: 40px; }
+.tcard .tt { font-family: var(--pixel); font-size: 40px; color: var(--blue); }
+.tcard.lead .tt { color: var(--yellow); }
+.tie.tbdone { background: transparent; color: var(--yellow); border: 2px solid var(--yellow); }
+.dialog .opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.dialog .opt { background: transparent; color: var(--text); border: 3px solid var(--text); padding: 16px 12px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; text-align: left; }
+.dialog .opt b { font-family: var(--pixel); font-size: 11px; font-weight: normal; }
+.dialog .opt span { font-family: var(--mono); font-size: 22px; color: var(--muted); }
+.dialog .opt.hot { background: var(--yellow); color: var(--bg); border-color: var(--yellow); box-shadow: 5px 5px 0 var(--pink); }
+.dialog .opt.hot span { color: var(--bg); }
+.dialog .opt.cy { color: var(--cyan); border-color: var(--cyan); }
+.dialog .opt:not(:disabled):active { transform: translate(3px, 3px); box-shadow: none; }
+.dialog .choice.picked { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
+.tbbadge { font-family: var(--pixel); font-size: 10px; background: var(--bg); color: var(--yellow); padding: 6px 8px; }
+.pod.anim .blk .tbbadge { animation-delay: calc(var(--d) + var(--rise) + 1s); }
+.vote.big { padding: 14px 10px 14px 14px; border-width: 3px; }
+.vote.big i { width: 10px; height: 44px; }
+.vote.big .t { font-size: 34px; line-height: .95; }
+.vote.big button { width: 48px; height: 48px; }
+.frow .backers { display: flex; flex: none; align-items: center; }
+
+/* final selections: fixed columns so voters + numbers line up */
+.frow { display: grid; grid-template-columns: 22px 44px auto minmax(0, 1fr) 300px 150px 80px 56px 96px; column-gap: 14px; align-items: center; }
+.frow .t { min-width: 0; }
+.frow .backers { justify-content: center; }
+.frow .sharecell, .frow .tagcell { display: flex; justify-content: flex-start; }
+.frow .tagcell { justify-content: center; }
+.frow .sharecell button, .frow .ctl button { min-width: 44px; height: 40px; background: transparent; color: var(--text); border: 2px solid var(--line); font-family: var(--pixel); font-size: 11px; padding: 0 8px; }
+.frow .sharecell .share.on { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
+.frow .sharecell button:not(:disabled):active { transform: translate(2px, 2px); background: var(--text); color: var(--bg); }
+.frow .tot { width: auto; }
+.frow.fhead { background: transparent; border: 2px solid transparent; min-height: 0; padding: 0 16px 0 16px; }
+.frow.fhead .lbl { font-family: var(--pixel); font-size: 10px; letter-spacing: 2px; color: var(--cyan); text-align: center; }
+.pxclose { background: transparent; color: var(--muted); border: 2px solid var(--line); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; padding: 0; }
+.pxclose:hover { color: var(--pink); border-color: var(--pink); }
+.pxclose:active { transform: translate(2px, 2px); }
